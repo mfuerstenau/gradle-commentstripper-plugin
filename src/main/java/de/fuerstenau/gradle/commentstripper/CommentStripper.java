@@ -1,5 +1,28 @@
+/* The MIT License (MIT)
+ *
+ * Copyright (c) 2015 Malte Fürstenau
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 package de.fuerstenau.gradle.commentstripper;
 
+import de.fuerstenau.gradle.commentstripper.antlr.GroovyLexer;
 import de.fuerstenau.gradle.commentstripper.antlr.Java8Lexer;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
@@ -13,7 +36,6 @@ import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
-import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
@@ -40,56 +62,45 @@ class CommentStripper
 {
 
    private static final Logger LOG = LoggerFactory.getLogger (
-           CommentStripper.class.getCanonicalName ());
+           CommentStripper.class);
 
-   static void stripComments (final Path srcDir, final Path destDir, final Charset cs, final String keyword, EnumSet<CommentType> types) throws IOException
+   static void stripComments (final Path srcDir, final Path destDir, final Charset cs, final String keyword, EnumSet<CommentType> types, final DocType docType) throws IOException
    {
+
+      String glob = "glob:";
+      if (null != docType)
+      {
+         switch (docType)
+         {
+            case GROOVY:
+            {
+               glob = glob + "*.groovy";
+               break;
+            }
+            case JAVA:
+            {
+               glob = glob + "*.java";
+               break;
+            }
+            default:
+            {
+               throw new IllegalArgumentException ("docType MUST not be null");
+            }
+         }
+      }
+      else
+      {
+         throw new IllegalArgumentException ("docType MUST not be null");
+      }
+
       Worker.initConditional (new SimpleConditional (types, keyword));
-      final PathMatcher javaMatcher = FileSystems.getDefault ().getPathMatcher ("glob:" + "*.java");
+
+      final PathMatcher fileMatcher = FileSystems.getDefault ().getPathMatcher (glob);
       final ExecutorService executor = Executors.newFixedThreadPool (Runtime.getRuntime ().availableProcessors ());
       final List<Future<Void>> results = new ArrayList<> ();
 
       Files.walkFileTree (srcDir, EnumSet.noneOf (FileVisitOption.class), Integer.MAX_VALUE,
-              new SimpleFileVisitor<Path> ()
-      {
-         @Override
-         public FileVisitResult preVisitDirectory (Path dir, BasicFileAttributes attrs) throws IOException
-         {
-            Path target = destDir.resolve (srcDir.relativize (dir));
-            try
-            {
-               Files.copy (dir, target);
-            }
-            catch (FileAlreadyExistsException e)
-            {
-               if (!Files.isDirectory (target))
-               {
-                  throw e;
-               }
-            }
-            return FileVisitResult.CONTINUE;
-         }
-
-         @Override
-         public FileVisitResult visitFile (Path file, BasicFileAttributes attrs) throws IOException
-         {
-            Path outFilePath = destDir.resolve (srcDir.relativize (file));
-            if (Files.exists (outFilePath))
-            {
-               throw new FileAlreadyExistsException (outFilePath.toString ());
-            }
-
-            if (javaMatcher.matches (file.getFileName ()))
-            {
-               results.add (executor.submit (new Worker (file, destDir.resolve (srcDir.relativize (file)), cs)));
-            }
-            else
-            {
-               Files.copy (file, outFilePath);
-            }
-            return FileVisitResult.CONTINUE;
-         }
-      });
+              new StrippingFileVisitor (destDir, srcDir, fileMatcher, results, executor, cs, docType));
 
       executor.shutdown ();
 
@@ -141,25 +152,28 @@ class CommentStripper
       this.cond = cond;
    }
 
-   CommentStripper ()
-   {
-      this.cond = new DefaultConditional ();
-   }
-
    public static void main (String[] args) throws IOException
    {
 //      CommentStripper stripper = new CommentStripper (new SimpleConditional (EnumSet.of (CommentType.LINE), "---"));
 //      stripper.doStrip (Paths.get ("C:\\Users\\Nuffe\\Documents\\NetBeansProjects\\gradle-commentstripper-plugin\\xxx\\HelloBuildConfig.java"), Paths.get ("C:\\Users\\Nuffe\\Documents\\NetBeansProjects\\gradle-commentstripper-plugin\\xxx\\HelloBuildConfig_out.java"), Charsets.UTF_8);
    }
-   
-   private void doStrip (Path fin, Path fout, Charset cs) throws IOException
+
+   private void doStrip (Path fin, Path fout, Charset cs, DocType docType) throws IOException
    {
       try (Reader in = Files.newBufferedReader (fin, cs);
               OutputStream out = new BufferedOutputStream (Files.newOutputStream (fout)))
       {
          final ANTLRInputStream stream = new ANTLRInputStream (in);
 
-         CommonTokenStream tokens = new CommonTokenStream (new Java8Lexer (stream), Java8Lexer.COMMENTS);
+         final CommonTokenStream tokens;
+         if (docType == DocType.JAVA)
+         {
+            tokens = new CommonTokenStream (new GroovyLexer (stream), GroovyLexer.COMMENT);
+         }
+         else
+         {
+            tokens = new CommonTokenStream (new Java8Lexer (stream), Java8Lexer.COMMENTS);
+         }
 
          TokenStreamRewriter rew = new TokenStreamRewriter (tokens);
 
@@ -178,22 +192,13 @@ class CommentStripper
       }
    }
 
-   static class DefaultConditional extends FirstStringMatchConditional
-   {
-
-      DefaultConditional ()
-      {
-         super ("\\.");
-      }
-   }
-
    public static final class SimpleConditional implements CommentStrippingConditional
    {
 
       private final EnumSet<CommentType> commentSequenceMatchers;
 
       private final String sequence;
-      
+
       private final boolean sequenceEnabled;
       private Matcher commentStartMatcher;
       private final EnumMap<CommentType, Matcher> sequenceMatcher = new EnumMap<> (CommentType.class);
@@ -260,7 +265,7 @@ class CommentStripper
          }
          if (commentStartMatcher.find ())
          {
-            
+
             switch (commentStartMatcher.group ())
             {
                case "//":
@@ -282,7 +287,7 @@ class CommentStripper
          }
          return res;
       }
-      
+
       @Override
       public boolean shouldStrip (String comment)
       {
@@ -290,62 +295,23 @@ class CommentStripper
          if (commentType != null && commentSequenceMatchers.contains (commentType))
          {
             if (!sequenceEnabled)
+            {
                return true;
-            
+            }
+
             return containsSequence (comment, commentType);
          }
-         
+
          return false;
-      }
-      
-   }
-   
-   abstract static class FirstStringMatchConditional implements CommentStrippingConditional
-   {
-
-      private Pattern p;
-      private Matcher m;
-      private final String s;
-
-      FirstStringMatchConditional (String s)
-      {
-         this.s = s;
-      }
-
-      private Pattern pattern ()
-      {
-         if (p == null)
-         {
-            p = Pattern.compile ("^\\/(?:(?:\\/\\s{0,127}+)|(?:[\\*\\s]{0,127}+))" + s);
-         }
-         return p;
-      }
-
-      private Matcher matcher (CharSequence s)
-      {
-         if (m == null)
-         {
-            m = pattern ().matcher (s);
-         }
-         else
-         {
-            m.reset (s);
-         }
-         return m;
-      }
-
-      @Override
-      public boolean shouldStrip (String comment)
-      {
-         return matcher (comment).find ();
       }
 
    }
 
    private static class Worker implements Callable<Void>
    {
+
       private static CommentStrippingConditional conditional;
-      
+
       private static final Object LOCK = new Object ();
 
       public static void initConditional (CommentStrippingConditional conditional)
@@ -365,12 +331,12 @@ class CommentStripper
          {
             if (conditional == null)
             {
-               conditional = new DefaultConditional ();
+               conditional = new SimpleConditional (EnumSet.allOf (CommentType.class), "");
             }
             return conditional;
          }
       }
-              
+
       static final ThreadLocal<CommentStripper> STRIPPER_THREAD_LOCAL = new ThreadLocal<CommentStripper> ()
       {
          @Override
@@ -383,12 +349,14 @@ class CommentStripper
       private final Path inFile;
       private final Path outFile;
       private final Charset charset;
+      private final DocType docType;
 
-      Worker (Path inFile, Path outFile, Charset charset)
+      Worker (Path inFile, Path outFile, Charset charset, DocType docType)
       {
          this.inFile = inFile;
          this.outFile = outFile;
          this.charset = charset;
+         this.docType = docType;
       }
 
       static void removeThreadLocal ()
@@ -402,7 +370,7 @@ class CommentStripper
       @Override
       public Void call () throws Exception
       {
-         STRIPPER_THREAD_LOCAL.get ().doStrip (inFile, outFile, charset);
+         STRIPPER_THREAD_LOCAL.get ().doStrip (inFile, outFile, charset, docType);
          return null;
       }
 
@@ -412,5 +380,66 @@ class CommentStripper
    {
 
       boolean shouldStrip (String comment);
+   }
+
+   private static class StrippingFileVisitor extends SimpleFileVisitor<Path>
+   {
+
+      private final Path destDir;
+      private final Path srcDir;
+      private final PathMatcher fileMatcher;
+      private final List<Future<Void>> results;
+      private final ExecutorService executor;
+      private final Charset cs;
+      private final DocType docType;
+
+      public StrippingFileVisitor (Path destDir, Path srcDir, PathMatcher fileMatcher, List<Future<Void>> results, ExecutorService executor, Charset cs, DocType docType)
+      {
+         this.destDir = destDir;
+         this.srcDir = srcDir;
+         this.fileMatcher = fileMatcher;
+         this.results = results;
+         this.executor = executor;
+         this.cs = cs;
+         this.docType = docType;
+      }
+
+      @Override
+      public FileVisitResult preVisitDirectory (Path dir, BasicFileAttributes attrs) throws IOException
+      {
+         Path target = destDir.resolve (srcDir.relativize (dir));
+         try
+         {
+            Files.copy (dir, target);
+         }
+         catch (FileAlreadyExistsException e)
+         {
+            if (!Files.isDirectory (target))
+            {
+               throw e;
+            }
+         }
+         return FileVisitResult.CONTINUE;
+      }
+
+      @Override
+      public FileVisitResult visitFile (Path file, BasicFileAttributes attrs) throws IOException
+      {
+         Path outFilePath = destDir.resolve (srcDir.relativize (file));
+         if (Files.exists (outFilePath))
+         {
+            throw new FileAlreadyExistsException (outFilePath.toString ());
+         }
+
+         if (fileMatcher.matches (file.getFileName ()))
+         {
+            results.add (executor.submit (new Worker (file, destDir.resolve (srcDir.relativize (file)), cs, docType)));
+         }
+         else
+         {
+            Files.copy (file, outFilePath);
+         }
+         return FileVisitResult.CONTINUE;
+      }
    }
 }

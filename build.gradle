@@ -47,7 +47,7 @@ def libJars () {
 dependencies {
    compile gradleApi()
    libjars 'com.google.code.findbugs:jsr305:3.0.0'
-   shadow 'org.antlr:antlr4-runtime:4.5.2-1'
+   shadow 'org.antlr:antlr4-runtime:4.5.3'
    libjars libJars()
 }
 

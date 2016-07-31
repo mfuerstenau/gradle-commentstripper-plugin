@@ -26,9 +26,8 @@ package de.fuerstenau.gradle.commentstripper;
  *
  * @author Nuffe
  */
-public enum CommentType
+public enum DocType
 {
-   BLOCK,
-   DOC,
-   LINE
+   JAVA,
+   GROOVY
 }

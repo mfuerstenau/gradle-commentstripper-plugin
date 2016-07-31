@@ -20,43 +20,42 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-
 package de.fuerstenau.gradle.commentstripper
 
-import org.gradle.api.GradleException
-import org.gradle.api.Plugin
-import org.gradle.api.Project
-import org.gradle.api.UnknownDomainObjectException
-import org.gradle.api.artifacts.Configuration
-import org.gradle.api.artifacts.Dependency
-import org.gradle.api.artifacts.UnknownConfigurationException
-import org.gradle.api.plugins.PluginManager
-import org.gradle.api.tasks.SourceSet
-import org.gradle.api.tasks.TaskCollection
-import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.api.plugins.JavaPluginConvention
+import org.gradle.api.plugins.GroovyPlugin
+import org.gradle.api.plugins.UnknownPluginException
+import groovy.transform.CompileStatic
+import org.gradle.api.GradleScriptException
+
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
-/**
- * @author Malte Fürstenau
- */
-class CommentStripperPlugin implements Plugin<Project>
+@CompileStatic
+class GroovyCommentStripperTask extends BaseCommentStripperTask
 {
+   private static final Logger LOG = LoggerFactory.getLogger (GroovyCommentStripperTask)
 
-   static final String MAIN_SOURCESET = "main"
-   static final String FD_SOURCE_OUTPUT = "gen/commentstripper/src"
-
-   private static final Logger LOG = LoggerFactory.getLogger (
-      CommentStripperPlugin)
-
-   private Project p
-   
-   @Override
-   void apply (Project p)
+   @groovy.transform.TypeChecked(groovy.transform.TypeCheckingMode.SKIP)
+   private Set<File> getMainGroovySourceSet ()
    {
-      this.p = p
-      p.apply plugin: 'java'
-
-      LOG.debug "CommentStripperPlugin loaded."
+      ((org.gradle.api.file.SourceDirectorySet) project.convention.getPlugin (JavaPluginConvention).getSourceSets ().getByName ('main').getProperty ('groovy')).srcDirs
+   }
+   
+   GroovyCommentStripperTask ()
+   {
+      super ()
+      try
+      {
+         project.getPlugins ().getPlugin (GroovyPlugin)
+      }
+      catch (UnknownPluginException ex)
+      {
+         throw new GradleScriptException ('GroovyCommentStripperTask needs Gradle GroovyPlugin to be applied.', ex)
+      }
+      
+      inputFiles = getMainGroovySourceSet ()
+      docType = DocType.GROOVY;
+      outputDirectories = getOutputDirectories ()
    }
 }

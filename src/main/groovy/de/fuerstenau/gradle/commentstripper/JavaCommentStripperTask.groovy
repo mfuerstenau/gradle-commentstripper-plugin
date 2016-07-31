@@ -20,15 +20,24 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-package de.fuerstenau.gradle.commentstripper;
+package de.fuerstenau.gradle.commentstripper
 
-/**
- *
- * @author Nuffe
- */
-public enum CommentType
+import org.gradle.api.plugins.JavaPluginConvention
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import groovy.transform.CompileStatic
+
+@CompileStatic
+class JavaCommentStripperTask extends BaseCommentStripperTask
 {
-   BLOCK,
-   DOC,
-   LINE
+   private static final Logger LOG = LoggerFactory.getLogger (JavaCommentStripperTask)
+
+   JavaCommentStripperTask ()
+   {
+      super ()
+      
+      inputFiles = project.convention.getPlugin (JavaPluginConvention).sourceSets.getByName (CommentStripperPlugin.MAIN_SOURCESET).java.srcDirs
+      docType = DocType.JAVA;
+      outputDirectories = getOutputDirectories ()
+   }
 }
